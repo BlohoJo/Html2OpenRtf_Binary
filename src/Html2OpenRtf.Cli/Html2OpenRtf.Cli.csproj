@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>Html2OpenRtf</AssemblyName>
+    <!-- Distinct package id so NuGet restore does not confuse this project with the library project. -->
+    <PackageId>Html2OpenRtf.Cli</PackageId>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Html2OpenRtf.Cli</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Version>1.0.0</Version>
+    <Product>Html2OpenRtf</Product>
+    <Description>Command-line HTML to RTF converter (Html2OpenRtf)</Description>
+    <Copyright>MIT License</Copyright>
+    <!-- Avoid trimming: HtmlAgilityPack is not annotated for trimming. -->
+    <PublishTrimmed>false</PublishTrimmed>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(PublishSingleFile)' == 'true'">
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+
+  <!-- `dotnet publish -r win-x64 ...` puts the exe in <repo>/publish/win-x64/ (an explicit -o still wins). -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <PublishDir>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '..', 'publish', '$(RuntimeIdentifier)'))</PublishDir>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <!--
+    The library sources are compiled directly into the executable instead of using a ProjectReference:
+    the exe must be called Html2OpenRtf.exe, and an assembly named "Html2OpenRtf" cannot coexist with the
+    library assembly of the same name. This yields a single assembly and the exe name the user expects.
+  -->
+  <ItemGroup>
+    <Compile Include="..\Html2OpenRtf\**\*.cs"
+             Exclude="..\Html2OpenRtf\bin\**;..\Html2OpenRtf\obj\**"
+             Link="Library\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="HtmlAgilityPack" Version="1.11.*" />
+  </ItemGroup>
+
+</Project>

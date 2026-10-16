@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Html2OpenRtf sample</title>
+<style>body { font-family: Arial; } /* <style> blocks are ignored; inline styles are used */</style>
+</head>
+<body>
+<h2 style="font-family: Georgia, serif; color: #1f4e79">Html2OpenRtf CLI sample</h2>
+<p>Normal paragraph with <b>bold</b>, <i>italic</i>, <span style="color:#c00000">red text</span> and
+<span style="background-color:#ffff00">yellow background</span>.</p>
+
+<pre style="font-family: Consolas, 'Courier New', monospace; font-size: 10pt; line-height: 1.4; background: #1e1e1e; color: #d4d4d4">
+<span style="color:#569cd6; background:#1e1e1e">public</span> <span style="color:#569cd6">static</span> <span style="color:#4ec9b0">int</span> <span style="color:#dcdcaa">Add</span>(<span style="color:#4ec9b0">int</span> a, <span style="color:#4ec9b0">int</span> b)
+{
+    <span style="color:#6a9955; font-style: italic">// tabs and spaces are preserved</span>
+	<span style="color:#c586c0">return</span> a + b;   <span style="color:#6a9955">// trailing comment</span>
+}
+</pre>
+
+<pre style="font-family: 'Courier New'; font-size: 12px">
+<span style="color: rgb(255, 255, 255); background: rgb(0, 0, 128)"> WHITE ON NAVY </span> <span style="color:black; background-color: #00ff00">black on green</span>
+<span style="color: #800080; font-size: 16px; font-weight: bold">Bigger bold purple</span>
+<span style="font-family: 'Times New Roman', serif; font-size: 14pt; color: darkred">Times New Roman 14pt</span>
+
+Line after an empty line, unicode: café – naïve – Пациент – 你好 – ✓
+</pre>
+
+<p style="font-family: Verdana; font-size: 9pt; line-height: 18px; color: #444">
+Verdana 9pt with a fixed 18px line height.<br>Second line after &lt;br&gt;.</p>
+</body>
+</html>
