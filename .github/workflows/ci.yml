@@ -5,6 +5,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -29,3 +30,40 @@ jobs:
 
     - name: Test
       run: dotnet test --no-build --configuration Release --verbosity normal
+
+
+  # Builds the standalone exe on every push/PR so a fresh Html2OpenRtf.exe can be downloaded from the run's artifacts.
+  cli-exe:
+    needs: build
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Publish standalone Html2OpenRtf.exe (win-x64)
+      run: dotnet publish src/Html2OpenRtf.Cli/Html2OpenRtf.Cli.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o dist/win-x64
+
+    - name: Smoke test
+      run: |
+        $exe = '.\dist\win-x64\Html2OpenRtf.exe'
+        & $exe --version
+        if ($LASTEXITCODE -ne 0) { throw '--version failed' }
+        & $exe samples\sample.html "$env:RUNNER_TEMP\sample.rtf"
+        if ($LASTEXITCODE -ne 0) { throw 'conversion failed' }
+        if (-not (Select-String -Path "$env:RUNNER_TEMP\sample.rtf" -Pattern '\\cbpat' -Quiet)) { throw 'background color missing from the RTF' }
+        & $exe does-not-exist.html
+        if ($LASTEXITCODE -ne 2) { throw "expected exit code 2 for a missing input, got $LASTEXITCODE" }
+        exit 0
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: Html2OpenRtf-win-x64
+        path: dist/win-x64/Html2OpenRtf.exe
