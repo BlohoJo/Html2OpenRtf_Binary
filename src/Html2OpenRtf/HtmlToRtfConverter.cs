@@ -15,9 +15,18 @@ namespace Html2OpenRtf
         /// </summary>
         /// <param name="html">HTML content to convert.</param>
         /// <returns>RTF document string, or empty RTF document if input is null/empty.</returns>
-        public static string ConvertHtmlToRtf(string html)
+        public static string ConvertHtmlToRtf(string? html) => ConvertHtmlToRtf(html, null);
+
+        /// <summary>
+        /// Converts an HTML string to an RTF string using the given options.
+        /// </summary>
+        /// <param name="html">HTML content to convert.</param>
+        /// <param name="options">Conversion options; null uses the defaults.</param>
+        /// <returns>RTF document string, or empty RTF document if input is null/empty.</returns>
+        public static string ConvertHtmlToRtf(string? html, HtmlToRtfOptions? options)
         {
-            var builder = new RtfDocumentBuilder();
+            options ??= new HtmlToRtfOptions();
+            var builder = new RtfDocumentBuilder(options.EmitHighlight);
 
             if (string.IsNullOrWhiteSpace(html))
                 return builder.Build();
@@ -25,8 +34,9 @@ namespace Html2OpenRtf
             var doc = new HtmlDocument();
             doc.LoadHtml(html);
 
-            var visitor = new HtmlNodeVisitor(builder);
+            var visitor = new HtmlNodeVisitor(builder, options);
             visitor.Visit(doc.DocumentNode);
+            visitor.Finish();
 
             return builder.Build();
         }
@@ -35,9 +45,14 @@ namespace Html2OpenRtf
         /// Converts an HTML string to RTF bytes (ASCII encoded).
         /// RTF is an ASCII-based format; all non-ASCII characters are escaped as \uN? sequences.
         /// </summary>
-        public static byte[] ConvertHtmlToRtfBytes(string html)
+        public static byte[] ConvertHtmlToRtfBytes(string? html) => ConvertHtmlToRtfBytes(html, null);
+
+        /// <summary>
+        /// Converts an HTML string to RTF bytes (ASCII encoded) using the given options.
+        /// </summary>
+        public static byte[] ConvertHtmlToRtfBytes(string? html, HtmlToRtfOptions? options)
         {
-            var rtf = ConvertHtmlToRtf(html);
+            var rtf = ConvertHtmlToRtf(html, options);
             // Safe: ConvertHtmlToRtf produces pure ASCII (non-ASCII chars are \uN? escaped).
             return Encoding.ASCII.GetBytes(rtf);
         }
@@ -46,9 +61,14 @@ namespace Html2OpenRtf
         /// Converts an HTML string to a Base64-encoded RTF string.
         /// Convenient for wire formats and APIs that expect Base64 payloads.
         /// </summary>
-        public static string ConvertHtmlToBase64Rtf(string html)
+        public static string ConvertHtmlToBase64Rtf(string? html) => ConvertHtmlToBase64Rtf(html, null);
+
+        /// <summary>
+        /// Converts an HTML string to a Base64-encoded RTF string using the given options.
+        /// </summary>
+        public static string ConvertHtmlToBase64Rtf(string? html, HtmlToRtfOptions? options)
         {
-            var bytes = ConvertHtmlToRtfBytes(html);
+            var bytes = ConvertHtmlToRtfBytes(html, options);
             return Convert.ToBase64String(bytes);
         }
     }

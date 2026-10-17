@@ -11,20 +11,40 @@ namespace Html2OpenRtf
     /// </summary>
     internal sealed class RtfDocumentBuilder
     {
+        /// <summary>Font table index of the default proportional font (Arial).</summary>
+        public const int DefaultFontIndex = 0;
+
+        /// <summary>Font table index of the default monospace font (Courier New).</summary>
+        public const int MonospaceFontIndex = 1;
+
         private readonly StringBuilder _body = new StringBuilder();
         private readonly List<RtfColor> _colors = new List<RtfColor>();
-        private readonly List<string> _fonts = new List<string>();
-        private bool _firstParagraph = true;
+        private readonly List<RtfFont> _fonts = new List<RtfFont>();
+        private readonly bool _emitHighlight;
 
-        public RtfDocumentBuilder()
+        public RtfDocumentBuilder() : this(emitHighlight: false) { }
+
+        /// <param name="emitHighlight">
+        /// Also emit <c>\highlightN</c> next to <c>\chcbpatN</c> for character backgrounds
+        /// (helps RichEdit-based readers such as WordPad / RichTextBox).
+        /// </param>
+        public RtfDocumentBuilder(bool emitHighlight)
         {
+            _emitHighlight = emitHighlight;
+
             // Default fonts
-            _fonts.Add("Arial");        // \f0 - default proportional
-            _fonts.Add("Courier New");  // \f1 - monospace (for <pre>/<code>)
+            _fonts.Add(new RtfFont("Arial", FontKind.Sans, null));        // \f0 - default proportional
+            _fonts.Add(new RtfFont("Courier New", FontKind.Mono, null));  // \f1 - monospace (for <pre>/<code>)
 
             // Index 0 = auto color (placeholder; rendered as empty entry ";" in color table)
             _colors.Add(new RtfColor(0, 0, 0));
         }
+
+        /// <summary>Current length of the body buffer (used to remember positions for later removal).</summary>
+        public int Length => _body.Length;
+
+        /// <summary>Removes a previously emitted fragment from the body buffer.</summary>
+        public void Remove(int start, int length) => _body.Remove(start, length);
 
         /// <summary>
         /// Register a color and return its 1-based index for use in \cfN / \chcbpatN.
@@ -42,52 +62,77 @@ namespace Html2OpenRtf
             return _colors.Count - 1;
         }
 
-        public void AppendText(string text)
+        /// <summary>
+        /// Register a font by name and return its index for use in \fN. Names are matched case-insensitively.
+        /// </summary>
+        public int RegisterFont(string name, FontKind kind, string? alternate)
+        {
+            name = SanitizeFontName(name);
+            if (name.Length == 0) return DefaultFontIndex;
+            alternate = alternate == null ? null : SanitizeFontName(alternate);
+            if (alternate != null && (alternate.Length == 0 || alternate.Equals(name, StringComparison.OrdinalIgnoreCase)))
+                alternate = null;
+
+            for (int i = 0; i < _fonts.Count; i++)
+            {
+                if (_fonts[i].Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                    return i;
+            }
+            _fonts.Add(new RtfFont(name, kind, alternate));
+            return _fonts.Count - 1;
+        }
+
+        /// <summary>True if the font at <paramref name="index"/> is a fixed-pitch (monospace) font.</summary>
+        public bool IsMonospaceFont(int index) =>
+            index >= 0 && index < _fonts.Count && _fonts[index].Kind == FontKind.Mono;
+
+        private static string SanitizeFontName(string name)
+        {
+            var sb = new StringBuilder(name.Length);
+            foreach (char c in name)
+            {
+                // ';' terminates a font table entry; braces/backslashes would break the RTF structure.
+                if (c == ';' || c == '{' || c == '}' || c == '\\' || char.IsControl(c)) continue;
+                sb.Append(c);
+            }
+            return sb.ToString().Trim();
+        }
+
+        public void AppendText(string text) => AppendEscaped(_body, text);
+
+        private static void AppendEscaped(StringBuilder sb, string text)
         {
             foreach (char c in text)
             {
                 if (c == '\\')
-                    _body.Append("\\\\");
+                    sb.Append("\\\\");
                 else if (c == '{')
-                    _body.Append("\\{");
+                    sb.Append("\\{");
                 else if (c == '}')
-                    _body.Append("\\}");
+                    sb.Append("\\}");
                 else if (c == '\n')
-                    _body.Append("\\line ");
-                else if (c == '\r')
-                    continue; // skip CR
+                    sb.Append("\\line ");
                 else if (c == '\t')
-                    _body.Append("\\tab ");
+                    sb.Append("\\tab ");
+                else if (c < 0x20 || c == 0x7F)
+                    continue; // skip CR and other control characters
                 else if (c > 127)
-                    AppendUnicode(c);
+                    AppendUnicode(sb, c);
                 else
-                    _body.Append(c);
+                    sb.Append(c);
             }
         }
 
-        private void AppendUnicode(char c)
+        private static void AppendUnicode(StringBuilder sb, char c)
         {
             // RTF Unicode escape: \uN? where N is signed 16-bit and ? is fallback char
             short signed = unchecked((short)c);
-            _body.Append("\\u");
-            _body.Append(signed.ToString(CultureInfo.InvariantCulture));
-            _body.Append('?');
+            sb.Append("\\u");
+            sb.Append(signed.ToString(CultureInfo.InvariantCulture));
+            sb.Append('?');
         }
 
         public void AppendRaw(string rtf) => _body.Append(rtf);
-
-        public void Paragraph()
-        {
-            if (_firstParagraph)
-            {
-                _firstParagraph = false;
-                _body.Append("\\pard ");
-            }
-            else
-            {
-                _body.Append("\\par\\pard ");
-            }
-        }
 
         public void LineBreak() => _body.Append("\\line ");
 
@@ -108,7 +153,12 @@ namespace Html2OpenRtf
         public void ForeColor(int colorIndex) => _body.Append($"\\cf{colorIndex} ");
 
         /// <summary>Set background color by color table index (uses \chcbpat for arbitrary colors).</summary>
-        public void BackgroundColor(int colorIndex) => _body.Append($"\\chcbpat{colorIndex} ");
+        public void BackgroundColor(int colorIndex)
+        {
+            _body.Append($"\\chcbpat{colorIndex} ");
+            if (_emitHighlight)
+                _body.Append($"\\highlight{colorIndex} ");
+        }
 
         /// <summary>Reset all character formatting to defaults.</summary>
         public void ResetCharFormat() => _body.Append("\\plain\\f0\\fs24 ");
@@ -119,10 +169,17 @@ namespace Html2OpenRtf
         /// <summary>Begin an RTF hyperlink field. Call EndHyperlink() after writing link content.</summary>
         public void BeginHyperlink(string url)
         {
-            // Escape backslashes and quotes in URL for RTF field instruction
+            // Escape quotes for the field instruction; braces/backslashes/non-ASCII via the normal RTF text escaping.
             var escaped = url.Replace("\\", "\\\\").Replace("\"", "\\\"");
             _body.Append("{\\field{\\*\\fldinst{HYPERLINK \"");
-            _body.Append(escaped);
+            foreach (char c in escaped)
+            {
+                if (c == '{') _body.Append("\\{");
+                else if (c == '}') _body.Append("\\}");
+                else if (c < 0x20 || c == 0x7F) continue;
+                else if (c > 127) AppendUnicode(_body, c);
+                else _body.Append(c);
+            }
             _body.Append("\"}}{\\fldrslt{");
         }
 
@@ -132,10 +189,13 @@ namespace Html2OpenRtf
             _body.Append("}}}");
         }
 
-        /// <summary>Horizontal rule: thin line across the page.</summary>
+        /// <summary>
+        /// Horizontal rule: starts an (empty) paragraph with a bottom border.
+        /// The caller is responsible for terminating it with \par.
+        /// </summary>
         public void HorizontalRule()
         {
-            _body.Append("\\pard\\brdrb\\brdrs\\brdrw10\\brsp20 \\par\\pard ");
+            _body.Append("\\pard\\brdrb\\brdrs\\brdrw10\\brsp20 ");
         }
 
         /// <summary>Left indent in twips (1 inch = 1440 twips).</summary>
@@ -156,9 +216,16 @@ namespace Html2OpenRtf
             sb.Append("{\\fonttbl");
             for (int i = 0; i < _fonts.Count; i++)
             {
-                string charset = "\\fcharset0";
-                string family = i == 1 ? "\\fmodern" : "\\fswiss";
-                sb.Append($"{{\\f{i}{family}{charset} {_fonts[i]};}}");
+                var font = _fonts[i];
+                sb.Append($"{{\\f{i}{FamilyControlWord(font.Kind)}{(font.Kind == FontKind.Mono ? "\\fprq1" : "\\fprq2")}\\fcharset0 ");
+                AppendEscaped(sb, font.Name);
+                if (font.Alternate != null)
+                {
+                    sb.Append("{\\*\\falt ");
+                    AppendEscaped(sb, font.Alternate);
+                    sb.Append('}');
+                }
+                sb.Append(";}");
             }
             sb.Append('}');
 
@@ -183,10 +250,30 @@ namespace Html2OpenRtf
             return sb.ToString();
         }
 
+        private static string FamilyControlWord(FontKind kind)
+        {
+            switch (kind)
+            {
+                case FontKind.Mono: return "\\fmodern";
+                case FontKind.Serif: return "\\froman";
+                case FontKind.Script: return "\\fscript";
+                case FontKind.Decorative: return "\\fdecor";
+                default: return "\\fswiss";
+            }
+        }
+
         private readonly struct RtfColor
         {
             public readonly byte R, G, B;
             public RtfColor(byte r, byte g, byte b) { R = r; G = g; B = b; }
+        }
+
+        private sealed class RtfFont
+        {
+            public readonly string Name;
+            public readonly FontKind Kind;
+            public readonly string? Alternate;
+            public RtfFont(string name, FontKind kind, string? alternate) { Name = name; Kind = kind; Alternate = alternate; }
         }
     }
 }
