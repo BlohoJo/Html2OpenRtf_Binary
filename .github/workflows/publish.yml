@@ -1,23 +1,61 @@
-name: Publish NuGet Package
+# Builds the standalone Html2OpenRtf.exe (win-x64, self-contained, single file).
+#
+# - Publishing a GitHub Release: the exe (and a zip with README/LICENSE/sample) is attached to that release.
+# - Actions tab -> "Release Windows exe" -> "Run workflow": builds the exe as a downloadable workflow artifact;
+#   fill in "tag" with an existing release tag (e.g. v1.0.0) to attach the files to that release as well.
+#
+# This replaces the upstream "Publish NuGet Package" workflow, which pushed the library to nuget.org and
+# therefore needed a NUGET_API_KEY secret that this fork does not have (and should not need).
+name: Release Windows exe
 
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to build and attach the exe to (e.g. v1.0.0). Leave empty to only build an artifact from the selected branch.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write   # needed to upload assets to the release
 
 jobs:
-  publish:
-    runs-on: ubuntu-latest
-    permissions:
-      packages: write
-      contents: read
+  windows-exe:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.release.tag_name || inputs.tag || github.ref }}
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '8.0.x'
+
+    - name: Determine version
+      id: ver
+      run: |
+        $tag = $env:RELEASE_TAG
+        $version = ''
+        if ($tag -match '^v?(\d+\.\d+\.\d+(\.\d+)?(-[0-9A-Za-z.-]+)?)$') {
+          $version = $Matches[1]
+        } elseif ($tag) {
+          Write-Host "::warning::Tag '$tag' is not a version number; the exe keeps the version from the .csproj."
+        }
+        $label = if ($tag) { $tag } else { "build-$($env:GITHUB_SHA.Substring(0, 7))" }
+        "version=$version" >> $env:GITHUB_OUTPUT
+        "label=$label"     >> $env:GITHUB_OUTPUT
+        Write-Host "tag='$tag' version='$version' label='$label'"
 
     - name: Restore
       run: dotnet restore
@@ -28,8 +66,63 @@ jobs:
     - name: Test
       run: dotnet test --no-build --configuration Release --verbosity normal
 
-    - name: Pack
-      run: dotnet pack src/Html2OpenRtf/Html2OpenRtf.csproj --no-build --configuration Release --output ./nupkg
+    - name: Publish standalone Html2OpenRtf.exe (win-x64)
+      run: |
+        $publishArgs = @(
+          'src/Html2OpenRtf.Cli/Html2OpenRtf.Cli.csproj',
+          '-c', 'Release',
+          '-r', 'win-x64',
+          '--self-contained', 'true',
+          '-p:PublishSingleFile=true',
+          '-p:IncludeNativeLibrariesForSelfExtract=true',
+          '-o', 'dist/win-x64'
+        )
+        if ('${{ steps.ver.outputs.version }}') { $publishArgs += '-p:Version=${{ steps.ver.outputs.version }}' }
+        dotnet publish @publishArgs
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Get-ChildItem dist/win-x64
 
-    - name: Push to NuGet.org
-      run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json"
+    - name: Smoke test
+      run: |
+        $exe = '.\dist\win-x64\Html2OpenRtf.exe'
+        & $exe --version
+        if ($LASTEXITCODE -ne 0) { throw '--version failed' }
+        & $exe samples\sample.html "$env:RUNNER_TEMP\sample.rtf"
+        if ($LASTEXITCODE -ne 0) { throw 'conversion failed' }
+        $rtf = Get-Content -Raw "$env:RUNNER_TEMP\sample.rtf"
+        if (-not $rtf.StartsWith('{\rtf1')) { throw 'output is not RTF' }
+        if ($rtf -notmatch '\\cbpat') { throw 'background color missing from the RTF' }
+        & $exe does-not-exist.html
+        if ($LASTEXITCODE -ne 2) { throw "expected exit code 2 for a missing input, got $LASTEXITCODE" }
+        exit 0
+
+    - name: Package
+      id: pkg
+      run: |
+        $name  = "Html2OpenRtf_win-x64_${{ steps.ver.outputs.label }}"
+        $stage = Join-Path $env:RUNNER_TEMP $name
+        New-Item -ItemType Directory -Force -Path "$stage/samples" | Out-Null
+        Copy-Item dist/win-x64/Html2OpenRtf.exe $stage
+        Copy-Item README.md, LICENSE $stage
+        Copy-Item samples/sample.html "$stage/samples"
+        Compress-Archive -Path "$stage/*" -DestinationPath "dist/$name.zip" -Force
+        "zip=dist/$name.zip" >> $env:GITHUB_OUTPUT
+        "name=$name"         >> $env:GITHUB_OUTPUT
+        "stage=$stage"       >> $env:GITHUB_OUTPUT
+
+    - name: Upload workflow artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.pkg.outputs.name }}
+        path: ${{ steps.pkg.outputs.stage }}
+
+    - name: Attach to GitHub Release
+      if: env.RELEASE_TAG != ''
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh release upload "$env:RELEASE_TAG" `
+          dist/win-x64/Html2OpenRtf.exe `
+          "${{ steps.pkg.outputs.zip }}" `
+          --clobber --repo "$env:GITHUB_REPOSITORY"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
