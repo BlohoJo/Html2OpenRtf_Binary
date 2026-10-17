@@ -65,6 +65,18 @@ dotnet publish -r win-x64 --self-contained true -p:PublishSingleFile=true -p:Inc
 The executable is written to `publish/win-x64/Html2OpenRtf.exe` (use `-o <dir>` to choose another folder).
 Use `-r linux-x64` or `-r osx-arm64` to build the same tool for other platforms.
 
+### Building the exe with GitHub Actions
+
+- **Build and Test** (`ci.yml`, runs on every push / PR to `main`, or manually): builds and tests the library on Linux and
+  Windows, then publishes and smoke-tests `Html2OpenRtf.exe`; download it from the run's **Artifacts** section.
+- **Release Windows exe** (`publish.yml`): when a GitHub Release is published, the exe is built from the release tag
+  (its version is taken from the tag, e.g. `v1.2.0` -> `1.2.0`), tested, and `Html2OpenRtf.exe` plus
+  `Html2OpenRtf_win-x64_<tag>.zip` (exe, README, LICENSE, sample) are attached to the release. It can also be started
+  manually from the Actions tab; enter an existing tag to (re)attach the files to that release.
+
+No secrets are needed. (The upstream project's workflow pushed the library to nuget.org with a `NUGET_API_KEY`; this
+fork builds the exe instead.)
+
 ## Installation
 
 ```bash

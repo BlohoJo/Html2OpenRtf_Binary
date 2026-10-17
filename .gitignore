@@ -7,4 +7,5 @@ obj/
 TestResults/
 
 publish/
+dist/
 artifacts/
